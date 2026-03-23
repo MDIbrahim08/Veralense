@@ -89,6 +89,14 @@ export interface LogEntry {
   type: 'info' | 'success' | 'error' | 'warning';
 }
 
+export interface AudioAnalysis {
+  audioUrl?: string;
+  verdict: 'ai_generated' | 'likely_synthetic' | 'appears_authentic' | 'unverified';
+  confidence: number;
+  indicators: string[];
+  transcription?: string;
+}
+
 export interface VerificationReport {
   inputText: string;
   inputUrl?: string;
@@ -96,6 +104,7 @@ export interface VerificationReport {
   verifications: ClaimVerification[];
   aiDetection?: AIDetectionResult;
   imageAnalyses?: ImageAnalysis[];
+  audioAnalyses?: AudioAnalysis[];
   cognitiveAnalysis?: CognitiveAnalysis;
   timestamp: string;
   totalElapsedMs: number;

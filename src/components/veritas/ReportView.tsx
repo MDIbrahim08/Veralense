@@ -32,8 +32,8 @@ export function ReportView({ report, onReset, onTranslate, isTranslating }: Repo
 
       {report.cognitiveAnalysis && <CognitiveAnalysisCard analysis={report.cognitiveAnalysis} />}
 
-      {report.imageAnalyses && report.imageAnalyses.length > 0 && (
-        <MediaAnalysis analyses={report.imageAnalyses} />
+      {(report.imageAnalyses?.length || report.audioAnalyses?.length) && (
+        <MediaAnalysis analyses={report.imageAnalyses} audioAnalyses={report.audioAnalyses} />
       )}
 
       <div className="flex flex-col lg:flex-row gap-6">
