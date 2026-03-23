@@ -41,7 +41,7 @@ export function useVerificationPipeline() {
   // Throttle: wait between API calls to stay under Groq's 30 RPM rate limit
   const throttle = useCallback(() => new Promise(r => setTimeout(r, 600)), []);
 
-  const callAPI = useCallback(async (action: string, params: Record<string, unknown>) => {
+  const callAPI = useCallback(async (action: string, params: Record<string, unknown>, retryCount = 0): Promise<any> => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
     if (!supabaseUrl || !supabaseKey) throw new Error('Backend configuration missing. Check environment variables.');
@@ -61,12 +61,17 @@ export function useVerificationPipeline() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         
-        // On 429 Or 500 (since we're hitting rate limits often), retry aggressively
+        // On 429 Or 500 (since we're hitting rate limits often), retry a couple of times, then HIT FALLBACK
         if (res.status === 429 || res.status === 500) {
-          const waitTime = res.status === 429 ? 12000 : 3000;
-          addLog(`Server busy (status ${res.status}) — Retrying in ${waitTime/1000}s...`, 'warning');
-          await new Promise(r => setTimeout(r, waitTime));
-          return callAPI(action, params);
+          if (retryCount < 2) {
+            const waitTime = res.status === 429 ? 12000 : 3000;
+            addLog(`Server under pressure (status ${res.status}) — Retrying in ${waitTime/1000}s...`, 'warning');
+            await new Promise(r => setTimeout(r, waitTime));
+            return callAPI(action, params, retryCount + 1);
+          } else {
+            addLog(`Server still high-load — Switching to Direct Neural Bridge...`, 'info');
+            throw new Error(`SEREVR_FAIL_${res.status}`);
+          }
         }
         throw new Error(err.error || `API error ${res.status}`);
       }
@@ -75,18 +80,47 @@ export function useVerificationPipeline() {
       clearTimeout(timeout);
       
       // CRITICAL FALLBACK: If Supabase Edge Function is failing (e.g. Docker/Deploy issues),
-      // we can try to hit the API providers (Groq/Tavily) DIRECTLY if keys are available locally.
+      // we can try to hit the API providers (Groq/Tavily/Gemini) DIRECTLY if keys are available locally.
       const GROQ_KEY = (import.meta as any).env?.VITE_GROQ_API_KEY;
+      const TAVLY_KEY = (import.meta as any).env?.VITE_TAVLY_API_KEY;
       const GEMINI_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY;
       
-      if ((GROQ_KEY || GEMINI_KEY) && (action === 'extract-claims' || action === 'verify-claim' || action === 'generate-queries' || action === 'analyze-cognitive')) {
-        addLog(`Backend unreachable — Engaging Agentic Fallback Control...`, 'info');
+      const isLLMAction = ['extract-claims', 'verify-claim', 'generate-queries', 'analyze-cognitive', 'detect-ai', 'audit-verdict'].includes(action);
+      
+      if (GEMINI_KEY && action === 'analyze-image') {
+        addLog(`Medium bypass engaged — Analyzing via direct Vision link...`, 'info');
+        try {
+          const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: "Analyze this image for AI manipulation or synthetic generation. Detect deepfake patterns. Return JSON: { \"verdict\": \"ai_generated\" | \"appears_authentic\", \"confidence\": number, \"indicators\": string[], \"reasoning\": \"string\" }" },
+                  { inline_data: { mime_type: params.mediaType || "image/jpeg", data: params.imageBase64 } }
+                ]
+              }]
+            })
+          });
+          if (gemRes.ok) {
+            const data = await gemRes.json();
+            const text = data.candidates[0].content.parts[0].text;
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (jsonMatch) return JSON.parse(jsonMatch[0]);
+          }
+        } catch (err) { console.error("Vision Fallback failed", err); }
+      }
+
+      if (GROQ_KEY && isLLMAction) {
+        addLog(`Backend pressure detected — Engaging Direct Neural Fallback...`, 'info');
         try {
           const SYSTEM_PROMPTS: Record<string, string> = {
             'extract-claims': 'You are a precision claim extractor. Decompose text into atomic factual statements. Max 6 claims. Return JSON: { "claims": [...] }',
             'generate-queries': 'Generate 2-3 search queries for this claim. Return JSON: { "queries": [...] }',
             'verify-claim': 'Fact-check this claim using the provided evidence. Be assertive but fair. Return JSON with verdict, confidence, chainOfThought, etc.',
-            'analyze-cognitive': 'Analyze sentiment and bias. Return JSON: { "sentiment": {...}, "bias": {...}, "narrativeAnalysis": "..." }'
+            'analyze-cognitive': 'Analyze sentiment and bias. Return JSON: { "sentiment": {...}, "bias": {...}, "narrativeAnalysis": "..." }',
+            'detect-ai': 'Analyze the text for AI patterns. Return JSON: { "overallProbability": number, "verdict": "string", "reasoning": "string" }',
+            'audit-verdict': 'You are an expert auditor. Review the claim and evidence. Is the current verdict accurate? If not, provide a refined verdict. Return JSON: { "isCorrectionNeeded": boolean, "refinedVerdict": { "verdict": "string", "confidence": number, "chainOfThought": "string" } }'
           };
           
           const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -106,9 +140,45 @@ export function useVerificationPipeline() {
             const content = data.choices[0].message.content;
             try { return JSON.parse(content); } catch { }
           }
-        } catch (err) {
-          console.error("Fallback failed", err);
-        }
+        } catch (err) { console.error("LLM Fallback failed", err); }
+      }
+
+      if (TAVLY_KEY && action === 'search-evidence') {
+        addLog(`Search bridge failing — Attempting direct Tavily link...`, 'info');
+        try {
+          const tavRes = await fetch("https://api.tavly.com/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              api_key: TAVLY_KEY,
+              query: params.query,
+              search_depth: "advanced",
+              include_images: false,
+              max_results: 5
+            })
+          });
+          if (tavRes.ok) {
+            const data = await tavRes.json();
+            return { results: (data.results || []).map((r: any) => ({ ...r, domain: new URL(r.url).hostname })) };
+          }
+        } catch (err) { console.error("Search Fallback failed", err); }
+      }
+
+      if (TAVLY_KEY && action === 'fetch-url') {
+        addLog(`Extraction service busy — Engaged direct scraper fallback...`, 'info');
+        try {
+          // Tavily 'extract' endpoint is great for this
+          const tavRes = await fetch("https://api.tavly.com/extract", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ api_key: TAVLY_KEY, urls: [params.url] })
+          });
+          if (tavRes.ok) {
+            const data = await tavRes.json();
+            const result = data.results?.[0];
+            return { text: result?.raw_content || result?.text || "Failed to extract text.", images: [] };
+          }
+        } catch (err) { console.error("Fetch Fallback failed", err); }
       }
 
       if (e.name === 'AbortError') throw new Error('Process timed out — possibly due to high traffic.');
@@ -218,22 +288,42 @@ export function useVerificationPipeline() {
         try {
           await throttle(); // pace verify calls
           const v = await callAPI('verify-claim', { claim: claim.text, evidence });
-          const wasReviewed = false;
-          const initialVerdict = v.verdict;
-          const initialConfidence = v.confidence;
-          // Self-reflection skipped to conserve API quota — re-enable when quota is higher
+          let finalV = v;
+          let wasReviewed = false;
+          let initialVerdict = v.verdict;
+          let initialConfidence = v.confidence;
+
+          // INNOVATION: SELF-REFLECTION LOOP
+          // Only audit if verdict is "True" or "False" to be certain
+          if (v.confidence > 70) {
+            try {
+              addLog(`Auditing verdict for accuracy...`);
+              await throttle();
+              const audit = await callAPI('audit-verdict', { 
+                claim: claim.text, 
+                verdict: v.verdict, 
+                reasoning: v.chainOfThought, 
+                evidence 
+              });
+              if (audit.isCorrectionNeeded) {
+                addLog(`Audit suggested refinement for claim ${i+1}. Applying...`, 'warning');
+                finalV = { ...v, ...audit.refinedVerdict };
+                wasReviewed = true;
+              }
+            } catch { /* ignore audit failure */ }
+          }
 
           verifications.push({
-            claimId: claim.id, claim, ...v,
+            claimId: claim.id, claim, ...finalV,
             searchQueries: claimQueries[claim.id] || [],
             evidenceSources: evidence,
             totalSourcesRetrieved: evidence.length,
-            totalSourcesUsed: (v.usedSourceUrls || []).length,
+            totalSourcesUsed: (finalV.usedSourceUrls || []).length,
             wasReviewed,
             initialVerdict: wasReviewed ? initialVerdict : undefined,
             initialConfidence: wasReviewed ? initialConfidence : undefined,
           });
-          addLog(`Claim ${i + 1}: ${v.verdict} (${v.confidence}%)`, 'success');
+          addLog(`Claim ${i + 1}: ${finalV.verdict} (${finalV.confidence}%)`, 'success');
         } catch (e: any) {
           addLog(`Verification failed for claim ${i + 1}: ${e.message}`, 'error');
           verifications.push({
