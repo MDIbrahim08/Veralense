@@ -142,45 +142,28 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
     const base64 = capturedImageBase64.split(',')[1];
 
     try {
-      // UNIVERSAL MASTER FIX: Cycle through all possible model names to guarantee a hit
-      const tryModel = async (modelName: string) => {
-        try {
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_KEY}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{
-                parts: [
-                  { text: "Extract ALL text from this document. Return ONLY plain text." },
-                  { inline_data: { mime_type: "image/jpeg", data: base64 } }
-                ]
-              }]
-            })
-          });
-          return res;
-        } catch { return null; }
-      };
-
-      const modelsToTry = ["gemini-1.5-flash-latest", "gemini-1.5-flash-8b", "gemini-1.5-pro", "gemini-pro-vision"];
-      let lastRes: any = null;
-
-      for (const model of modelsToTry) {
-        console.log(`Checking neural path: ${model}...`);
-        const res = await tryModel(model);
-        if (res && res.ok) {
-          const data = await res.json();
-          if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-            const extractedText = data.candidates[0].content.parts[0].text;
-            handleTextChange(extractedText);
-            stopCamera();
-            return;
-          }
-        }
-        lastRes = res;
-      }
+      // Final specific fix: use the exact standard model gemini-1.5-flash
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: "Extract ALL text from this document. Return ONLY plain text." },
+              { inline_data: { mime_type: "image/jpeg", data: base64 } }
+            ]
+          }]
+        })
+      });
       
-      const data = lastRes ? await lastRes.json() : { error: { message: "All neural paths busy." } };
-      throw new Error(data.error?.message || "All models returned 404 or were unavailable.");
+      const data = await res.json();
+      if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        const extractedText = data.candidates[0].content.parts[0].text;
+        handleTextChange(extractedText);
+        stopCamera();
+      } else {
+        throw new Error(data.error?.message || "Extraction failed. Check API key and rate limits.");
+      }
     } catch (err: any) {
       console.error("VeraScan Forensic Link Error:", err);
       alert(`⚠️ Neural Bridge Busy: ${err.message || 'The AI extraction agent is under heavy volume. Please retake the photo or try again.'}`);
