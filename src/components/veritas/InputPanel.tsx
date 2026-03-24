@@ -149,7 +149,7 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
       if (res.ok) {
         const data = await res.json();
         const extractedText = data.candidates[0].content.parts[0].text;
-        setText(extractedText);
+        handleTextChange(extractedText);
       }
     } catch (err) {
       alert("Scan failed. Please try a clearer photo or upload manually.");
