@@ -85,7 +85,7 @@ export function useVerificationPipeline() {
       const TAVLY_KEY = (import.meta as any).env?.VITE_TAVLY_API_KEY;
       const GEMINI_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY;
       
-      const isLLMAction = ['extract-claims', 'verify-claim', 'generate-queries', 'analyze-cognitive', 'detect-ai', 'audit-verdict'].includes(action);
+      const isLLMAction = ['extract-claims', 'verify-claim', 'generate-queries', 'analyze-cognitive', 'detect-ai', 'audit-verdict', 'translate-report'].includes(action);
       
       if (GEMINI_KEY && action === 'analyze-image') {
         addLog(`Medium bypass engaged — Analyzing via direct Vision link...`, 'info');
@@ -120,7 +120,8 @@ export function useVerificationPipeline() {
             'verify-claim': 'Fact-check this claim using the provided evidence. Be assertive but fair. Return JSON with verdict, confidence, chainOfThought, etc.',
             'analyze-cognitive': 'Analyze sentiment and bias. Return JSON: { "sentiment": {...}, "bias": {...}, "narrativeAnalysis": "..." }',
             'detect-ai': 'Analyze the text for AI patterns. Return JSON: { "overallProbability": number, "verdict": "string", "reasoning": "string" }',
-            'audit-verdict': 'You are an expert auditor. Review the claim and evidence. Is the current verdict accurate? If not, provide a refined verdict. Return JSON: { "isCorrectionNeeded": boolean, "refinedVerdict": { "verdict": "string", "confidence": number, "chainOfThought": "string" } }'
+            'audit-verdict': 'You are an expert auditor. Review the claim and evidence. Is the current verdict accurate? If not, provide a refined verdict. Return JSON: { "isCorrectionNeeded": boolean, "refinedVerdict": { "verdict": "string", "confidence": number, "chainOfThought": "string" } }',
+            'translate-report': 'You are a professional translator. Translate the entire JSON report while preserving the structure. Translate all text fields (claims, verdicts, reasonings, descriptions) into the targetLanguage. Return ONLY the translated JSON.'
           };
           
           const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -165,8 +166,32 @@ export function useVerificationPipeline() {
       }
 
       if (action === 'fetch-url') {
-        const targetUrl = params.url as string;
-        
+        let targetUrl = params.url as string;
+
+        // --- NEW: URL CLEANER (Extracts URL if user pastes a full <iframe> or <a> tag) ---
+        const iframeMatch = targetUrl.match(/src="([^"]+)"/);
+        const anchorMatch = targetUrl.match(/href="([^"]+)"/);
+        if (iframeMatch) targetUrl = iframeMatch[1];
+        else if (anchorMatch) targetUrl = anchorMatch[1];
+        else targetUrl = targetUrl.trim().split(' ')[0]; // Basic trim/clean
+
+        // --- NEW: YOUTUBE INTELLIGENCE BRIDGE ---
+        if (targetUrl.includes('youtube.com') || targetUrl.includes('youtu.be')) {
+          addLog(`YouTube video detected — Extracting video metadata...`, 'info');
+          try {
+            // Use noembed.com (free, CORS-friendly oEmbed provider)
+            const yRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(targetUrl)}`);
+            if (yRes.ok) {
+              const yData = await yRes.json();
+              const metaText = `Video Title: ${yData.title}\nAuthor: ${yData.author_name}\n\n[YouTube Metadata Analysis]: This video content is being verified based on its public title and metadata.`;
+              if (yData.title) {
+                addLog(`Successfully extracted metadata for: "${yData.title}"`, 'success');
+                return { text: metaText, images: [yData.thumbnail_url].filter(Boolean) };
+              }
+            }
+          } catch (err) { addLog(`YouTube metadata extraction failed, falling back to general scraper...`, 'warning'); }
+        }
+
         // PRIORITY 1: Tavily Extract API — best option, CORS-enabled, clean output
         if (TAVLY_KEY) {
           addLog(`Fetching URL via Tavily Extract API...`, 'info');
