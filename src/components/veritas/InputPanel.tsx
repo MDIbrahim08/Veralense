@@ -40,6 +40,124 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
   const [recognitionInstance, setRecognitionInstance] = useState<any>(null);
   const [recognitionLang, setRecognitionLang] = useState('en-US');
 
+  // VERALENS VISION: Camera & OCR Scanning
+  const [isScanning, setIsScanning] = useState(false);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // VERASUGGEST: AI Autocorrect
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const suggestTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const getAiSuggestion = async (input: string) => {
+    if (input.length < 10) return;
+    setIsSuggesting(true);
+    try {
+      const GROQ_KEY = (import.meta as any).env?.VITE_GROQ_API_KEY;
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${GROQ_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [{
+            role: "system",
+            content: "You are a professional editor. If the input text has obvious transcription errors, factual spelling mistakes (especially names), or major grammar issues, return ONLY the corrected version. If the text is fine, return exactly 'OK'. Max 50 words. Do NOT add preamble."
+          }, {
+            role: "user",
+            content: input
+          }]
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const content = data.choices[0].message.content.trim();
+        if (content !== 'OK' && content !== input) {
+          setSuggestion(content);
+        } else {
+          setSuggestion(null);
+        }
+      }
+    } catch (err) { /* ignore */ }
+    finally { setIsSuggesting(false); }
+  };
+
+  const handleTextChange = (val: string) => {
+    setText(val);
+    setSuggestion(null);
+    setIsDemoMode(false);
+    
+    if (suggestTimeoutRef.current) clearTimeout(suggestTimeoutRef.current);
+    suggestTimeoutRef.current = setTimeout(() => getAiSuggestion(val), 2000);
+  };
+
+  const startCamera = async () => {
+    try {
+      setIsScanning(true);
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' } // Standard for mobile scanning
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
+      }
+    } catch (err) {
+      alert("Camera access denied or unavailable.");
+      setIsScanning(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    setIsScanning(false);
+  };
+
+  const captureAndScan = async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    setIsOcrProcessing(true);
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    ctx?.drawImage(videoRef.current, 0, 0);
+    
+    const base64 = canvas.toDataURL('image/jpeg').split(',')[1];
+    stopCamera();
+
+    try {
+      // Call standard verify with a special "OCR_ONLY" flag if needed, 
+      // or just use our Gemini Vision fallback directly for OCR
+      const GEMINI_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: "Extract all verifiable text from this document image. Return ONLY the plain text content of the document." },
+              { inline_data: { mime_type: "image/jpeg", data: base64 } }
+            ]
+          }]
+        })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        const extractedText = data.candidates[0].content.parts[0].text;
+        setText(extractedText);
+      }
+    } catch (err) {
+      alert("Scan failed. Please try a clearer photo or upload manually.");
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  };
+
   const startRecording = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -56,7 +174,7 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
       const transcript = Array.from(event.results)
         .map((result: any) => result[0].transcript)
         .join('');
-      setText(transcript);
+      handleTextChange(transcript);
     };
 
     recognition.onerror = (event: any) => {
@@ -151,14 +269,27 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
       <div className="glass-card p-6 space-y-6">
         {mode === 'text' ? (
           <div className="space-y-4">
-            <div className="relative">
+            <div className="relative group">
               <textarea
                 value={text}
-                onChange={(e) => { setText(e.target.value); setIsDemoMode(false); }}
+                onChange={(e) => handleTextChange(e.target.value)}
                 placeholder="Paste a news article, essay, or AI-generated content to verify..."
                 className="w-full min-h-[160px] p-4 bg-elevated/50 border border-border rounded-xl text-foreground placeholder:text-muted-foreground resize-y font-sans text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/40 transition-shadow"
                 rows={6}
               />
+
+              {suggestion && (
+                <div className="absolute -top-3 left-4 animate-in slide-in-from-bottom-2 duration-300">
+                  <button 
+                    onClick={() => { setText(suggestion); setSuggestion(null); }}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-accent text-accent-foreground text-[10px] font-bold rounded-full shadow-lg shadow-accent/20 hover:scale-105 transition-transform"
+                  >
+                    <span>💡 Did you mean:</span>
+                    <span className="opacity-80 line-clamp-1 italic">"{suggestion.slice(0, 30)}..."</span>
+                    <span className="flex items-center px-1 bg-white/20 rounded">Apply</span>
+                  </button>
+                </div>
+              )}
               
               <div className="absolute bottom-3 right-3 flex items-center gap-3">
                 <span className="text-xs text-muted-foreground font-mono">
@@ -212,15 +343,24 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
                     <div className="flex items-center gap-2">
                        <label className="cursor-pointer group flex-1">
                         <div className="flex items-center justify-center gap-2 px-3 py-2 bg-primary/10 text-primary rounded-lg border border-primary/20 hover:bg-primary/20 transition-all text-xs font-semibold">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-                          {localImage ? 'Change' : 'Upload'}
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                          Upload
                         </div>
                         <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                       </label>
+                      
+                      <button 
+                        onClick={startCamera}
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-accent/10 text-accent rounded-lg border border-accent/20 hover:bg-accent/20 transition-all text-xs font-semibold"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+                        VeraScan
+                      </button>
+
                       {localImage && (
                         <button 
                           onClick={() => { setLocalImage(null); setLocalImageBase64(null); }}
-                          className="p-2 text-muted-foreground hover:text-destructive transition-colors bg-elevated rounded-lg"
+                          className="p-2 text-muted-foreground hover:text-destructive transition-colors bg-elevated rounded-lg border border-border"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                         </button>
@@ -299,6 +439,58 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
           ))}
         </div>
       </div>
+
+      {/* SCANNER OVERLAY */}
+      {isScanning && (
+        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300">
+          <div className="relative w-full h-full max-w-lg md:h-[80vh] md:max-h-[800px] md:rounded-3xl overflow-hidden border-border/20 shadow-2xl">
+            <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+            
+            {/* Scanning Guide UI */}
+            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-12">
+              <div className="w-full max-w-[280px] h-[340px] border-2 border-primary/40 rounded-[2rem] relative">
+                <div className="absolute -inset-1 border border-primary/20 rounded-[2.2rem]" />
+                <div className="absolute inset-x-0 h-0.5 bg-primary/60 shadow-[0_0_20px_rgba(33,150,243,0.9)] animate-[scan_3s_linear_infinite]" />
+              </div>
+              <p className="text-white/80 text-[11px] font-bold uppercase tracking-[0.25em] bg-black/60 backdrop-blur-md px-5 py-2 rounded-full border border-white/10">Align text inside frame</p>
+            </div>
+            
+            {isOcrProcessing && (
+              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center gap-4">
+                <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                <p className="text-primary font-bold text-sm uppercase tracking-widest animate-pulse">Extracting Knowledge...</p>
+              </div>
+            )}
+
+            {/* Close Button for mobile */}
+            <button 
+              onClick={stopCamera}
+              className="absolute top-6 right-6 p-3 bg-black/40 text-white rounded-full border border-white/20 hover:bg-black/60 transition-all active:scale-90"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
+          
+          <div className="absolute bottom-10 left-0 right-0 px-6 flex flex-col gap-4 items-center">
+            <button 
+              onClick={captureAndScan}
+              disabled={isOcrProcessing}
+              className="w-20 h-20 bg-primary/20 p-2 rounded-full border-4 border-primary shadow-[0_0_30px_rgba(33,150,243,0.5)] active:scale-90 transition-all flex items-center justify-center group disabled:opacity-50"
+            >
+              <div className="w-full h-full bg-primary rounded-full group-hover:scale-95 transition-transform" />
+            </button>
+            <p className="text-white/40 text-[10px] font-medium uppercase tracking-widest">Tap button to capture</p>
+          </div>
+          <canvas ref={canvasRef} className="hidden" />
+        </div>
+      )}
+
+      <style>{`
+        @keyframes scan {
+          0% { transform: translateY(0); }
+          100% { transform: translateY(340px); }
+        }
+      `}</style>
 
       {isDemoMode && (
         <div className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 bg-primary/10 text-primary text-xs rounded-full">

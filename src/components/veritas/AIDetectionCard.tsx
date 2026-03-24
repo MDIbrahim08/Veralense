@@ -11,7 +11,21 @@ const INDICATOR_LABELS: { key: keyof AIDetectionResult['indicators']; label: str
 ];
 
 export function AIDetectionCard({ detection }: { detection: AIDetectionResult }) {
-  const { overallProbability, indicators, verdict, explanation } = detection;
+  const { 
+    overallProbability = 0, 
+    indicators = {} as any, 
+    verdict = 'uncertain', 
+    explanation = "" 
+  } = detection;
+  
+  // Safe defaults for indicators to prevent 'undefined' crashes
+  const safeIndicators = {
+    vocabularyEntropy: indicators?.vocabularyEntropy ?? 0,
+    sentenceLengthUniformity: indicators?.sentenceLengthUniformity ?? 0,
+    hedgingLanguage: indicators?.hedgingLanguage ?? 0,
+    structuralRepetition: indicators?.structuralRepetition ?? 0,
+    perplexityEstimate: indicators?.perplexityEstimate ?? 0,
+  };
   const circumference = 2 * Math.PI * 42;
   const offset = circumference - (overallProbability / 100) * circumference;
 
@@ -50,7 +64,7 @@ export function AIDetectionCard({ detection }: { detection: AIDetectionResult })
           />
           <div className="space-y-2">
             {INDICATOR_LABELS.map(({ key, label }) => {
-              const val = indicators[key];
+              const val = safeIndicators[key as keyof typeof safeIndicators];
               return (
                 <div key={key}>
                   <div className="flex justify-between text-xs mb-0.5">

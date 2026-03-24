@@ -69,7 +69,7 @@ export function useVerificationPipeline() {
             await new Promise(r => setTimeout(r, waitTime));
             return callAPI(action, params, retryCount + 1);
           } else {
-            addLog(`Server still high-load — Switching to Direct Neural Bridge...`, 'info');
+            addLog(`Severe network bottleneck — Engaging Direct Neural Bridge...`, 'info');
             throw new Error(`SEREVR_FAIL_${res.status}`);
           }
         }
@@ -119,7 +119,7 @@ export function useVerificationPipeline() {
             'generate-queries': 'Generate 2-3 search queries for this claim. Return JSON: { "queries": [...] }',
             'verify-claim': 'Fact-check this claim using the provided evidence. Be assertive but fair. Return JSON with verdict, confidence, chainOfThought, etc.',
             'analyze-cognitive': 'Analyze sentiment and bias. Return JSON: { "sentiment": {...}, "bias": {...}, "narrativeAnalysis": "..." }',
-            'detect-ai': 'Analyze the text for AI patterns. Return JSON: { "overallProbability": number, "verdict": "string", "reasoning": "string" }',
+            'detect-ai': 'Analyze the text for AI patterns. Return JSON: { "overallProbability": number, "verdict": "likely_ai" | "uncertain" | "likely_human", "explanation": "string", "indicators": { "vocabularyEntropy": number, "sentenceLengthUniformity": number, "hedgingLanguage": number, "structuralRepetition": number, "perplexityEstimate": number } }',
             'audit-verdict': 'You are an expert auditor. Review the claim and evidence. Is the current verdict accurate? If not, provide a refined verdict. Return JSON: { "isCorrectionNeeded": boolean, "refinedVerdict": { "verdict": "string", "confidence": number, "chainOfThought": "string" } }',
             'translate-report': 'You are a professional translator. Translate the entire JSON report while preserving the structure. Translate all text fields (claims, verdicts, reasonings, descriptions) into the targetLanguage. Return ONLY the translated JSON.'
           };
@@ -141,7 +141,14 @@ export function useVerificationPipeline() {
             const content = data.choices[0].message.content;
             try { return JSON.parse(content); } catch { }
           }
-        } catch (err) { console.error("LLM Fallback failed", err); }
+        } catch (err) { 
+          if (retryCount < 2) {
+            console.log(`Neural Path unstable for ${action} — Retrying in 1s...`);
+            await new Promise(r => setTimeout(r, 1000));
+            return callAPI(action, params, retryCount + 1);
+          }
+          console.error("LLM Fallback exhausted", err); 
+        }
       }
 
       if (TAVLY_KEY && action === 'search-evidence') {
