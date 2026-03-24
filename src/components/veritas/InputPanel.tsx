@@ -142,19 +142,30 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
     const base64 = capturedImageBase64.split(',')[1];
 
     try {
-      // Reverting to v1beta as Gemini 1.5 Flash is currently exclusive to beta paths
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: "Extract ALL text from this document. If it's a newspaper or flyer, get the headlines and main bodies. Return ONLY plain text." },
-              { inline_data: { mime_type: "image/jpeg", data: base64 } }
-            ]
-          }]
-        })
-      });
+      // MASTER FIX: Try flash-latest first, then fallback to pro to guarantee extraction
+      const tryModel = async (modelName: string) => {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_KEY}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: "Extract ALL text from this document. Return ONLY plain text." },
+                { inline_data: { mime_type: "image/jpeg", data: base64 } }
+              ]
+            }]
+          })
+        });
+        return res;
+      };
+
+      let res = await tryModel("gemini-1.5-flash-latest");
+      
+      // Fallback if flash is missing in this region
+      if (!res.ok) {
+        console.warn("Flash model unavailable, rotating to Pro...");
+        res = await tryModel("gemini-1.5-pro");
+      }
       
       const data = await res.json();
       if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
