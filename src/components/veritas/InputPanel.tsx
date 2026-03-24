@@ -131,11 +131,15 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
   const analyzeOcr = async () => {
     if (!capturedImageBase64) return;
     
+    const GEMINI_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    if (!GEMINI_KEY) {
+      alert("⚠️ VeraScan Configuration Error: VITE_GEMINI_API_KEY is missing in your deployment setttings. Please add it and RE-DEPLOY the site.");
+      setIsOcrProcessing(false);
+      return;
+    }
+
     setIsOcrProcessing(true);
     const base64 = capturedImageBase64.split(',')[1];
-
-    try {
-      const GEMINI_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY;
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
