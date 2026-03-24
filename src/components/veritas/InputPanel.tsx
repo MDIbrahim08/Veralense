@@ -142,8 +142,8 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
     const base64 = capturedImageBase64.split(',')[1];
 
     try {
-      // Using stable v1 endpoint for better reliability in production
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
+      // Reverting to v1beta as Gemini 1.5 Flash is currently exclusive to beta paths
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
