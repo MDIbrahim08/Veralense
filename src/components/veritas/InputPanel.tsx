@@ -165,8 +165,32 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
         throw new Error(data.error?.message || "Extraction failed. Check API key and rate limits.");
       }
     } catch (err: any) {
-      console.error("VeraScan Forensic Link Error:", err);
-      alert(`⚠️ Neural Bridge Busy: ${err.message || 'The AI extraction agent is under heavy volume. Please retake the photo or try again.'}`);
+      console.warn("Gemini Failed, activating Global OCR Fallback...", err);
+      
+      // THE ULTIMATE FALLBACK: Free Public OCR API (Zero Config Required)
+      try {
+        const formData = new FormData();
+        formData.append("base64Image", "data:image/jpeg;base64," + base64);
+        formData.append("language", "eng");
+
+        // Using helloworld public key for quick demo saves
+        const ocrRes = await fetch("https://api.ocr.space/parse/image", {
+          method: "POST",
+          headers: { "apikey": "helloworld" },
+          body: formData
+        });
+        
+        const ocrData = await ocrRes.json();
+        if (ocrData && !ocrData.IsErroredOnProcessing && ocrData.ParsedResults?.length > 0) {
+          const extractedText = ocrData.ParsedResults[0].ParsedText;
+          handleTextChange(extractedText);
+          stopCamera();
+        } else {
+          throw new Error("OCR Fallback also failed");
+        }
+      } catch (fallbackErr) {
+        alert("⚠️ Neural Bridge Busy: All Vision AI links are overwhelmed by hackathon traffic. Please type manually for this demo.");
+      }
     } finally {
       setIsOcrProcessing(false);
     }
