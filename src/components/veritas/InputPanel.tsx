@@ -133,34 +133,41 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
     
     const GEMINI_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY;
     if (!GEMINI_KEY) {
-      alert("⚠️ VeraScan Configuration Error: VITE_GEMINI_API_KEY is missing in your deployment setttings. Please add it and RE-DEPLOY the site.");
+      alert("⚠️ VeraScan Guard: VITE_GEMINI_API_KEY not found in this build. Please confirm it's in Netlify settings and REDEPLOY.");
       setIsOcrProcessing(false);
       return;
     }
 
     setIsOcrProcessing(true);
     const base64 = capturedImageBase64.split(',')[1];
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
+
+    try {
+      // Using stable v1 endpoint for better reliability in production
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{
             parts: [
-              { text: "Extract all verifiable text from this document image. Return ONLY the plain text content of the document." },
+              { text: "Extract ALL text from this document. If it's a newspaper or flyer, get the headlines and main bodies. Return ONLY plain text." },
               { inline_data: { mime_type: "image/jpeg", data: base64 } }
             ]
           }]
         })
       });
       
-      if (res.ok) {
-        const data = await res.json();
+      const data = await res.json();
+      if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
         const extractedText = data.candidates[0].content.parts[0].text;
         handleTextChange(extractedText);
         stopCamera();
+      } else {
+        const errMsg = data.error?.message || "Cloud link unstable. Please try once more.";
+        throw new Error(errMsg);
       }
-    } catch (err) {
-      alert("Scan failed. Please try a clearer photo or upload manually.");
+    } catch (err: any) {
+      console.error("VeraScan Forensic Link Error:", err);
+      alert(`⚠️ Neural Bridge Busy: ${err.message || 'The AI extraction agent is under heavy volume. Please retake the photo or try again.'}`);
     } finally {
       setIsOcrProcessing(false);
     }
