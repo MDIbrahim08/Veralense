@@ -15,8 +15,28 @@ interface ReportViewProps {
   isTranslating: boolean;
 }
 
+function SectionHeader({ step, title, subtitle, icon }: { step: number; title: string; subtitle: string; icon: string }) {
+  return (
+    <div className="flex items-center gap-4 mb-3">
+      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-sm font-bold text-primary">
+        {step}
+      </div>
+      <div>
+        <div className="flex items-center gap-2">
+          <span className="text-base">{icon}</span>
+          <h2 className="text-sm font-bold text-foreground uppercase tracking-widest">{title}</h2>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
+      </div>
+    </div>
+  );
+}
+
 export function ReportView({ report, onReset, onTranslate, isTranslating }: ReportViewProps) {
   const [activeClaim, setActiveClaim] = useState<string | null>(null);
+  const totalSources = report.verifications.reduce((acc, v) => acc + (v.totalSourcesRetrieved ?? 0), 0);
+  const totalTrue = report.verifications.filter(v => v.verdict?.toLowerCase() === 'true').length;
+  const totalFalse = report.verifications.filter(v => v.verdict?.toLowerCase() === 'false').length;
 
   const scrollToClaim = (claimId: string) => {
     setActiveClaim(claimId);
@@ -25,48 +45,150 @@ export function ReportView({ report, onReset, onTranslate, isTranslating }: Repo
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-6">
-      <MetricStrip verifications={report.verifications} />
+    <div className="w-full max-w-7xl mx-auto space-y-8">
 
-      {report.aiDetection && <AIDetectionCard detection={report.aiDetection} />}
-
-      {report.cognitiveAnalysis && <CognitiveAnalysisCard analysis={report.cognitiveAnalysis} />}
-
-      {(report.imageAnalyses?.length || report.audioAnalyses?.length) && (
-        <MediaAnalysis analyses={report.imageAnalyses} audioAnalyses={report.audioAnalyses} />
-      )}
-
-      <div className="flex flex-col lg:flex-row gap-6">
-        <div className="lg:w-5/12">
-          <div className="lg:sticky lg:top-4">
-            <AnnotatedText
-              text={report.inputText}
-              claims={report.claims}
-              verifications={report.verifications}
-              activeClaim={activeClaim}
-              onClaimClick={scrollToClaim}
-            />
-          </div>
+      {/* ── REPORT BANNER ─────────────────────────────────────────── */}
+      <div className="glass-card p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-l-4 border-primary animate-fade-up">
+        <div>
+          <p className="text-xs font-bold text-primary uppercase tracking-widest mb-1">VeraLens Verification Report</p>
+          <h1 className="text-lg font-bold text-foreground">
+            {report.inputUrl
+              ? new URL(report.inputUrl).hostname.replace('www.', '')
+              : 'Text Analysis'
+            }
+          </h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            {report.claims.length} claims extracted &nbsp;·&nbsp;
+            {totalSources} sources searched &nbsp;·&nbsp;
+            {totalTrue} confirmed true &nbsp;·&nbsp;
+            {totalFalse} false
+            &nbsp;·&nbsp; {Math.round((report.totalElapsedMs || 0) / 1000)}s total analysis time
+          </p>
         </div>
-
-        <div className="lg:w-7/12 space-y-4">
-          {report.verifications.map((v, i) => (
-            <ClaimCard
-              key={v.claimId}
-              verification={v}
-              index={i}
-              isActive={activeClaim === v.claimId}
-            />
-          ))}
+        <div className="flex gap-2 flex-wrap">
+          <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20 uppercase tracking-widest animate-pulse">
+            Hallucination-Shield™ Active
+          </span>
+          <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20 uppercase tracking-widest">
+            Multi-Agent AI
+          </span>
+          <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-success/10 text-success border border-success/20 uppercase tracking-widest">
+            Evidence-Grounded
+          </span>
         </div>
       </div>
 
-      <ExportBar 
-        report={report} 
-        onReset={onReset} 
-        onTranslate={onTranslate} 
-        isTranslating={isTranslating} 
-      />
+      {/* ── STEP 1: CREDIBILITY SCORE ─────────────────────────────── */}
+      <div className="animate-fade-up">
+        <SectionHeader
+          step={1}
+          icon="📊"
+          title="Credibility Dashboard"
+          subtitle="Instant overview of how many claims are true, false, or unverifiable"
+        />
+        <MetricStrip verifications={report.verifications} />
+      </div>
+
+      {/* ── STEP 2: AI CONTENT DETECTION ─────────────────────────── */}
+      {report.aiDetection && (
+        <div className="animate-fade-up">
+          <SectionHeader
+            step={2}
+            icon="🤖"
+            title="AI Content Detection"
+            subtitle="Was this text written by a human or generated by an AI like ChatGPT?"
+          />
+          <AIDetectionCard detection={report.aiDetection} />
+        </div>
+      )}
+
+      {/* ── STEP 3: COGNITIVE ANALYSIS ───────────────────────────── */}
+      {report.cognitiveAnalysis && (
+        <div className="animate-fade-up">
+          <SectionHeader
+            step={3}
+            icon="🧠"
+            title="Cognitive & Bias Analysis"
+            subtitle="Detects emotional framing, political leaning, and manipulation techniques"
+          />
+          <CognitiveAnalysisCard analysis={report.cognitiveAnalysis} />
+        </div>
+      )}
+
+      {/* ── STEP 4: MEDIA VERIFICATION ───────────────────────────── */}
+      {(report.imageAnalyses?.length || report.audioAnalyses?.length) && (
+        <div className="animate-fade-up">
+          <SectionHeader
+            step={4}
+            icon="🎭"
+            title="Media & Deepfake Detection"
+            subtitle="Scans images for AI-generation artifacts and audio for synthetic voice patterns"
+          />
+          <MediaAnalysis analyses={report.imageAnalyses} audioAnalyses={report.audioAnalyses} />
+        </div>
+      )}
+
+      {/* ── STEP 5: CLAIM-BY-CLAIM VERIFICATION ──────────────────── */}
+      <div className="animate-fade-up">
+        <SectionHeader
+          step={(report.aiDetection ? 1 : 0) + (report.cognitiveAnalysis ? 1 : 0) + ((report.imageAnalyses?.length || report.audioAnalyses?.length) ? 1 : 0) + 2}
+          icon="🔍"
+          title="Claim-by-Claim Fact Check"
+          subtitle="Each statement from the article is extracted, searched on the web, and verified against real sources"
+        />
+
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Left: Annotated source text */}
+          <div className="lg:w-5/12">
+            <div className="lg:sticky lg:top-4">
+              <div className="mb-3 p-3 bg-primary/5 border border-primary/10 rounded-xl">
+                <p className="text-[10px] font-bold text-primary uppercase tracking-wider mb-0.5">📄 Source Text — Annotated</p>
+                <p className="text-xs text-muted-foreground">Click any highlighted phrase to jump to its verdict below</p>
+              </div>
+              <AnnotatedText
+                text={report.inputText}
+                claims={report.claims}
+                verifications={report.verifications}
+                activeClaim={activeClaim}
+                onClaimClick={scrollToClaim}
+              />
+            </div>
+          </div>
+
+          {/* Right: Individual claim cards */}
+          <div className="lg:w-7/12 space-y-4">
+            <div className="p-3 bg-elevated/40 border border-border/30 rounded-xl mb-2">
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">⚖️ Evidence Verdicts</p>
+              <p className="text-xs text-muted-foreground">Each card shows the verdict, confidence score, and the AI's full reasoning chain</p>
+            </div>
+            {report.verifications.map((v, i) => (
+              <ClaimCard
+                key={v.claimId}
+                verification={v}
+                index={i}
+                isActive={activeClaim === v.claimId}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── EXPORT / TRANSLATE ───────────────────────────────────── */}
+      <div className="animate-fade-up">
+        <SectionHeader
+          step={0}
+          icon="📤"
+          title="Export & Share"
+          subtitle="Download this report or translate it into Hindi / Kannada for regional accessibility"
+        />
+        <ExportBar
+          report={report}
+          onReset={onReset}
+          onTranslate={onTranslate}
+          isTranslating={isTranslating}
+        />
+      </div>
+
     </div>
   );
 }

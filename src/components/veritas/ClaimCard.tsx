@@ -25,11 +25,14 @@ interface ClaimCardProps {
 
 export function ClaimCard({ verification, index, isActive }: ClaimCardProps) {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
-  const config = VERDICT_CONFIG[verification.verdict];
-  const isLowConfidence = verification.confidence < 40 && verification.verdict === 'unverifiable';
+  
+  // SAFETY: Normalize verdict (API may return 'True' or 'true')
+  const rawVerdict = (verification.verdict || 'unverifiable').toLowerCase().replace(' ', '_') as keyof typeof VERDICT_CONFIG;
+  const config = VERDICT_CONFIG[rawVerdict] || VERDICT_CONFIG['unverifiable'];
+  const isLowConfidence = (verification.confidence ?? 0) < 40 && rawVerdict === 'unverifiable';
 
   return (
-    <GlassCard className={`verdict-${verification.verdict} animate-fade-up ${isActive ? 'ring-1 ring-primary/40 animate-highlight-pulse' : ''}`}>
+    <GlassCard className={`verdict-${rawVerdict} animate-fade-up ${isActive ? 'ring-1 ring-primary/40 animate-highlight-pulse' : ''}`}>
       <div
         id={`claim-${verification.claimId}`}
         style={{ animationDelay: `${index * 80}ms` }}
@@ -40,12 +43,14 @@ export function ClaimCard({ verification, index, isActive }: ClaimCardProps) {
           <div className="flex-1">
             <WordPullUp
               as="p"
-              words={verification.claim.text}
+              words={verification.claim?.text || ''}
               className="text-sm text-foreground leading-relaxed"
             />
-            <p className="text-xs text-muted-foreground mt-1 opacity-60 italic">
-              Original: &ldquo;{verification.claim.originalSpan}&rdquo;
-            </p>
+            {verification.claim?.originalSpan && (
+              <p className="text-xs text-muted-foreground mt-1 opacity-60 italic">
+                Original: &ldquo;{verification.claim.originalSpan}&rdquo;
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
             {verification.claim.isTimeSensitive && (
@@ -154,7 +159,7 @@ export function ClaimCard({ verification, index, isActive }: ClaimCardProps) {
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors active:scale-[0.98]"
           >
             <span className="transition-transform duration-200" style={{ transform: evidenceOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-block' }}>▶</span>
-            Evidence Trail ({verification.totalSourcesRetrieved} retrieved, {verification.totalSourcesUsed} used)
+            Evidence Trail ({verification.totalSourcesRetrieved ?? 0} retrieved, {verification.totalSourcesUsed ?? 0} used)
           </button>
 
           {evidenceOpen && (

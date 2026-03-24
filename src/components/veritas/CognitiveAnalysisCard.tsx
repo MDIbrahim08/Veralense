@@ -8,6 +8,14 @@ interface CognitiveAnalysisCardProps {
 }
 
 export function CognitiveAnalysisCard({ analysis }: CognitiveAnalysisCardProps) {
+  // SAFETY: Bail out if analysis or its required sub-objects are missing/malformed
+  if (!analysis || !analysis.bias || !analysis.sentiment) return null;
+
+  const biasLabel = analysis.bias?.label || 'neutral';
+  const sentimentLabel = analysis.sentiment?.label || 'neutral';
+  const sentimentScore = analysis.sentiment?.score ?? 50;
+  const biasCertainty = analysis.bias?.certainty ?? 50;
+
   const getBiasConfig = (label: string) => {
     switch (label) {
       case 'left': return { color: 'text-blue-500', bg: 'bg-blue-500/10', label: 'Left Wing' };
@@ -28,7 +36,12 @@ export function CognitiveAnalysisCard({ analysis }: CognitiveAnalysisCardProps) 
     }
   };
 
-  const biasConfig = getBiasConfig(analysis.bias.label);
+  const biasConfig = getBiasConfig(biasLabel);
+
+  const biasPosition = biasLabel === 'left' ? '10%' :
+    biasLabel === 'center-left' ? '30%' :
+    biasLabel === 'center-right' ? '70%' :
+    biasLabel === 'right' ? '90%' : '50%';
 
   return (
     <motion.div
@@ -61,21 +74,23 @@ export function CognitiveAnalysisCard({ analysis }: CognitiveAnalysisCardProps) 
             <div className="p-4 bg-elevated/50 border border-border rounded-xl space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium capitalize flex items-center gap-2">
-                  {getSentimentIcon(analysis.sentiment.label)}
-                  {analysis.sentiment.label}
+                  {getSentimentIcon(sentimentLabel)}
+                  {sentimentLabel}
                 </span>
-                <span className="text-xl font-bold text-foreground">{analysis.sentiment.score}%</span>
+                <span className="text-xl font-bold text-foreground">{sentimentScore}%</span>
               </div>
               <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
                 <motion.div 
                   initial={{ width: 0 }}
-                  animate={{ width: `${analysis.sentiment.score}%` }}
+                  animate={{ width: `${sentimentScore}%` }}
                   className="h-full bg-primary"
                 />
               </div>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {analysis.sentiment.description}
-              </p>
+              {analysis.sentiment.description && (
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {analysis.sentiment.description}
+                </p>
+              )}
             </div>
           </div>
 
@@ -87,48 +102,46 @@ export function CognitiveAnalysisCard({ analysis }: CognitiveAnalysisCardProps) 
             <div className="p-4 bg-elevated/50 border border-border rounded-xl space-y-3">
               <div className="flex items-center justify-between">
                 <span className={cn("text-sm font-bold capitalize", biasConfig.color)}>
-                  {analysis.bias.label.replace('-', ' ')}
+                  {biasLabel.replace('-', ' ')}
                 </span>
-                <span className="text-xs font-medium text-muted-foreground">Certainty: {analysis.bias.certainty}%</span>
+                <span className="text-xs font-medium text-muted-foreground">Certainty: {biasCertainty}%</span>
               </div>
               <div className="relative h-1 w-full bg-border rounded-full">
-                {/* Bias spectrum line */}
                 <div className="absolute left-1/2 -ml-[1px] h-full w-[2px] bg-muted-foreground/30 z-10" />
                 <motion.div 
                   initial={{ left: "50%" }}
-                  animate={{ 
-                    left: analysis.bias.label === 'left' ? "10%" : 
-                          analysis.bias.label === 'center-left' ? "30%" : 
-                          analysis.bias.label === 'neutral' ? "50%" : 
-                          analysis.bias.label === 'center-right' ? "70%" : "90%" 
-                  }}
+                  animate={{ left: biasPosition }}
                   className={cn("absolute -top-1 w-3 h-3 rounded-full border-2 border-surface shadow-lg z-20", 
-                    analysis.bias.label.includes('left') ? 'bg-blue-500' : 
-                    analysis.bias.label.includes('right') ? 'bg-red-500' : 'bg-emerald-500'
+                    biasLabel.includes('left') ? 'bg-blue-500' : 
+                    biasLabel.includes('right') ? 'bg-red-500' : 'bg-emerald-500'
                   )}
                 />
               </div>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {analysis.bias.description}
-              </p>
+              {analysis.bias.description && (
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {analysis.bias.description}
+                </p>
+              )}
             </div>
           </div>
         </div>
 
         {/* Narrative Analysis */}
-        <div className="mt-6 pt-6 border-t border-border">
-          <div className="flex items-start gap-3">
-            <div className="p-1.5 bg-primary/5 rounded-md mt-0.5">
-              <Info className="w-4 h-4 text-primary/70" />
-            </div>
-            <div className="space-y-1">
-              <span className="text-[10px] font-bold text-primary uppercase tracking-widest">Narrative Conclusion</span>
-              <p className="text-sm text-foreground/80 leading-relaxed italic">
-                "{analysis.narrativeAnalysis}"
-              </p>
+        {analysis.narrativeAnalysis && (
+          <div className="mt-6 pt-6 border-t border-border">
+            <div className="flex items-start gap-3">
+              <div className="p-1.5 bg-primary/5 rounded-md mt-0.5">
+                <Info className="w-4 h-4 text-primary/70" />
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold text-primary uppercase tracking-widest">Narrative Conclusion</span>
+                <p className="text-sm text-foreground/80 leading-relaxed italic">
+                  "{analysis.narrativeAnalysis}"
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </motion.div>
   );
