@@ -142,40 +142,45 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
     const base64 = capturedImageBase64.split(',')[1];
 
     try {
-      // MASTER FIX: Try flash-latest first, then fallback to pro to guarantee extraction
+      // UNIVERSAL MASTER FIX: Cycle through all possible model names to guarantee a hit
       const tryModel = async (modelName: string) => {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_KEY}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: "Extract ALL text from this document. Return ONLY plain text." },
-                { inline_data: { mime_type: "image/jpeg", data: base64 } }
-              ]
-            }]
-          })
-        });
-        return res;
+        try {
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_KEY}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: "Extract ALL text from this document. Return ONLY plain text." },
+                  { inline_data: { mime_type: "image/jpeg", data: base64 } }
+                ]
+              }]
+            })
+          });
+          return res;
+        } catch { return null; }
       };
 
-      let res = await tryModel("gemini-1.5-flash-latest");
-      
-      // Fallback if flash is missing in this region
-      if (!res.ok) {
-        console.warn("Flash model unavailable, rotating to Pro...");
-        res = await tryModel("gemini-1.5-pro");
+      const modelsToTry = ["gemini-1.5-flash-latest", "gemini-1.5-flash-8b", "gemini-1.5-pro", "gemini-pro-vision"];
+      let lastRes: any = null;
+
+      for (const model of modelsToTry) {
+        console.log(`Checking neural path: ${model}...`);
+        const res = await tryModel(model);
+        if (res && res.ok) {
+          const data = await res.json();
+          if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            const extractedText = data.candidates[0].content.parts[0].text;
+            handleTextChange(extractedText);
+            stopCamera();
+            return;
+          }
+        }
+        lastRes = res;
       }
       
-      const data = await res.json();
-      if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        const extractedText = data.candidates[0].content.parts[0].text;
-        handleTextChange(extractedText);
-        stopCamera();
-      } else {
-        const errMsg = data.error?.message || "Cloud link unstable. Please try once more.";
-        throw new Error(errMsg);
-      }
+      const data = lastRes ? await lastRes.json() : { error: { message: "All neural paths busy." } };
+      throw new Error(data.error?.message || "All models returned 404 or were unavailable.");
     } catch (err: any) {
       console.error("VeraScan Forensic Link Error:", err);
       alert(`⚠️ Neural Bridge Busy: ${err.message || 'The AI extraction agent is under heavy volume. Please retake the photo or try again.'}`);
