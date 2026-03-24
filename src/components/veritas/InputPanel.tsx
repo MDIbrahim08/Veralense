@@ -43,6 +43,7 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
   // VERALENS VISION: Camera & OCR Scanning
   const [isScanning, setIsScanning] = useState(false);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const [capturedImageBase64, setCapturedImageBase64] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -114,24 +115,26 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
       streamRef.current.getTracks().forEach(track => track.stop());
     }
     setIsScanning(false);
+    setCapturedImageBase64(null);
   };
 
-  const captureAndScan = async () => {
+  const captureFrame = () => {
     if (!videoRef.current || !canvasRef.current) return;
-    
-    setIsOcrProcessing(true);
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     canvas.width = videoRef.current.videoWidth;
     canvas.height = videoRef.current.videoHeight;
     ctx?.drawImage(videoRef.current, 0, 0);
+    setCapturedImageBase64(canvas.toDataURL('image/jpeg'));
+  };
+
+  const analyzeOcr = async () => {
+    if (!capturedImageBase64) return;
     
-    const base64 = canvas.toDataURL('image/jpeg').split(',')[1];
-    stopCamera();
+    setIsOcrProcessing(true);
+    const base64 = capturedImageBase64.split(',')[1];
 
     try {
-      // Call standard verify with a special "OCR_ONLY" flag if needed, 
-      // or just use our Gemini Vision fallback directly for OCR
       const GEMINI_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY;
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
         method: "POST",
@@ -150,6 +153,7 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
         const data = await res.json();
         const extractedText = data.candidates[0].content.parts[0].text;
         handleTextChange(extractedText);
+        stopCamera();
       }
     } catch (err) {
       alert("Scan failed. Please try a clearer photo or upload manually.");
@@ -444,25 +448,29 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
       {isScanning && (
         <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300">
           <div className="relative w-full h-full max-w-lg md:h-[80vh] md:max-h-[800px] md:rounded-3xl overflow-hidden border-border/20 shadow-2xl">
-            <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+            {capturedImageBase64 ? (
+              <img src={capturedImageBase64} className="w-full h-full object-cover" alt="Captured" />
+            ) : (
+              <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+            )}
             
-            {/* Scanning Guide UI */}
-            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-12">
-              <div className="w-full max-w-[280px] h-[340px] border-2 border-primary/40 rounded-[2rem] relative">
-                <div className="absolute -inset-1 border border-primary/20 rounded-[2.2rem]" />
-                <div className="absolute inset-x-0 h-0.5 bg-primary/60 shadow-[0_0_20px_rgba(33,150,243,0.9)] animate-[scan_3s_linear_infinite]" />
+            {!capturedImageBase64 && (
+              <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-12">
+                <div className="w-full max-w-[280px] h-[340px] border-2 border-primary/40 rounded-[2rem] relative">
+                  <div className="absolute -inset-1 border border-primary/20 rounded-[2.2rem]" />
+                  <div className="absolute inset-x-0 h-0.5 bg-primary/60 shadow-[0_0_20px_rgba(33,150,243,0.9)] animate-[scan_3s_linear_infinite]" />
+                </div>
+                <p className="text-white/80 text-[11px] font-bold uppercase tracking-[0.25em] bg-black/60 backdrop-blur-md px-5 py-2 rounded-full border border-white/10">Align text inside frame</p>
               </div>
-              <p className="text-white/80 text-[11px] font-bold uppercase tracking-[0.25em] bg-black/60 backdrop-blur-md px-5 py-2 rounded-full border border-white/10">Align text inside frame</p>
-            </div>
+            )}
             
             {isOcrProcessing && (
               <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center gap-4">
                 <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-                <p className="text-primary font-bold text-sm uppercase tracking-widest animate-pulse">Extracting Knowledge...</p>
+                <p className="text-primary font-bold text-sm uppercase tracking-widest animate-pulse">Neural Extraction Active...</p>
               </div>
             )}
 
-            {/* Close Button for mobile */}
             <button 
               onClick={stopCamera}
               className="absolute top-6 right-6 p-3 bg-black/40 text-white rounded-full border border-white/20 hover:bg-black/60 transition-all active:scale-90"
@@ -472,14 +480,34 @@ export function InputPanel({ onSubmit, onFetchUrl, isLoading }: InputPanelProps)
           </div>
           
           <div className="absolute bottom-10 left-0 right-0 px-6 flex flex-col gap-4 items-center">
-            <button 
-              onClick={captureAndScan}
-              disabled={isOcrProcessing}
-              className="w-20 h-20 bg-primary/20 p-2 rounded-full border-4 border-primary shadow-[0_0_30px_rgba(33,150,243,0.5)] active:scale-90 transition-all flex items-center justify-center group disabled:opacity-50"
-            >
-              <div className="w-full h-full bg-primary rounded-full group-hover:scale-95 transition-transform" />
-            </button>
-            <p className="text-white/40 text-[10px] font-medium uppercase tracking-widest">Tap button to capture</p>
+            {capturedImageBase64 ? (
+              <div className="flex gap-4 w-full max-w-md">
+                <button 
+                  onClick={() => setCapturedImageBase64(null)}
+                  className="flex-1 py-4 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-bold transition-all border border-white/10"
+                >
+                  Retake
+                </button>
+                <button 
+                  onClick={analyzeOcr}
+                  disabled={isOcrProcessing}
+                  className="flex-[2] py-4 bg-primary text-primary-foreground rounded-2xl font-bold shadow-[0_0_20px_rgba(33,150,243,0.4)] active:scale-[0.97] transition-all flex items-center justify-center gap-2"
+                >
+                  <div className="w-3 h-3 bg-white rounded-full animate-pulse" />
+                  AI Analyze Text
+                </button>
+              </div>
+            ) : (
+              <>
+                <button 
+                  onClick={captureFrame}
+                  className="w-20 h-20 bg-primary/20 p-2 rounded-full border-4 border-primary shadow-[0_0_30px_rgba(33,150,243,0.5)] active:scale-90 transition-all flex items-center justify-center group"
+                >
+                  <div className="w-full h-full bg-primary rounded-full group-hover:scale-95 transition-transform" />
+                </button>
+                <p className="text-white/40 text-[10px] font-medium uppercase tracking-widest">Tap to capture frame</p>
+              </>
+            )}
           </div>
           <canvas ref={canvasRef} className="hidden" />
         </div>
